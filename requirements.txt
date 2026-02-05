@@ -4,6 +4,9 @@ langchain-postgres[psycopg]
 langchain-mongodb
 langchain-oracledb
 mysql-connector-python
+langchain-huggingface 
+huggingface-hub==0.27.1
 oracledb 
 pymongo
 gradio
+
