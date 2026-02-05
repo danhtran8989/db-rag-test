@@ -2,7 +2,9 @@
 import gradio as gr
 from typing import List
 from langchain_core.documents import Document
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings, ChatHuggingFace, HuggingFacePipeline
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+import torch
 
 # ─── Import retriever factories ────────────────────────────────────────────
 from retrievers import (
@@ -14,8 +16,40 @@ from retrievers import (
 
 # ─── Global state ──────────────────────────────────────────────────────────
 current_retriever = None
-embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
+
+# Lightweight open-source embedding model (replacement for OpenAI's text-embedding-3-small)
+embeddings = HuggingFaceEmbeddings(
+    model_name="BAAI/bge-small-en-v1.5",
+    model_kwargs={"device": "cuda" if torch.cuda.is_available() else "cpu"},
+    encode_kwargs={"normalize_embeddings": True},
+)
+
+# Qwen3-1.7B as lightweight open-source LLM
+model_id = "Qwen/Qwen3-1.7B"          # or "Qwen/Qwen3-1.7B-Instruct" if you find instruct-tuned variant
+
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForCausalLM.from_pretrained(
+    model_id,
+    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+    device_map="auto",
+    low_cpu_mem_usage=True,
+)
+
+hf_pipeline = pipeline(
+    "text-generation",
+    model=model,
+    tokenizer=tokenizer,
+    max_new_tokens=512,
+    temperature=0.2,
+    top_p=0.9,
+    repetition_penalty=1.05,
+    do_sample=True,
+    device_map="auto",
+)
+
+llm = ChatHuggingFace(
+    llm=HuggingFacePipeline(pipeline=hf_pipeline),
+)
 
 # ─── RAG logic ─────────────────────────────────────────────────────────────
 def retrieve_and_generate(query: str, history: List):
@@ -41,7 +75,7 @@ def retrieve_and_generate(query: str, history: List):
     context = "\n".join(context_lines)
 
     system_prompt = """You are a helpful assistant that answers questions using **only** the provided context.
-If the context does not contain enough information, clearly say so."""
+If the context does not contain enough information, clearly say so and do not make up facts."""
 
     user_prompt = f"""Context:
 {context}
@@ -51,11 +85,14 @@ Question: {query}
 Answer:"""
 
     try:
-        response = llm.invoke([
+        messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_prompt},
-        ])
+        ]
+
+        response = llm.invoke(messages)
         answer = response.content.strip()
+
     except Exception as e:
         answer = f"LLM error: {str(e)}"
 
@@ -109,7 +146,7 @@ def connect_to_db(db_type: str, **kwargs):
 # ─── Gradio Interface ──────────────────────────────────────────────────────
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
-    gr.Markdown("# RAG Chat – Connect to Your Database")
+    gr.Markdown("# RAG Chat – Connect to Your Database (Open-source models)")
 
     with gr.Tab("Database Connection"):
         db_type = gr.Dropdown(
@@ -200,4 +237,36 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         clear.click(lambda: None, None, chatbot)
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="RAG Chat – Connect to Your Database (Open-source models)"
+    )
+    parser.add_argument(
+        "--share",
+        action="store_true",
+        help="Create a publicly shareable Gradio link (temporary public URL)"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=7860,
+        help="Port to run the Gradio server on (default: 7860)"
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Host to bind the server to (default: 0.0.0.0)"
+    )
+    # You can easily add more flags later, e.g.:
+    # parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+
+    args = parser.parse_args()
+
+    demo.launch(
+        server_name=args.host,
+        server_port=args.port,
+        share=args.share,
+        # debug=args.debug,   # if you add --debug later
+    )
