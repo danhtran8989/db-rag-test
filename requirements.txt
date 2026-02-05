@@ -1,6 +1,6 @@
 transformers==4.5.0
 langchain 
-langchain-openai
+# langchain-openai
 # langchain-postgres[psycopg]
 langchain-postgres
 langchain-mongodb
@@ -8,9 +8,10 @@ langchain-oracledb
 mysql-connector-python
 langchain-huggingface 
 huggingface-hub==0.33.1
-oracledb 
-pymongo
+# oracledb 
+# pymongo
 gradio
+
 
 
 
