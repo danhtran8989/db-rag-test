@@ -6,40 +6,47 @@ from langchain_core.embeddings import Embeddings
 # ─── PostgreSQL (Supabase compatible) ──────────────────────────────────────
 def get_postgres_retriever(
     connection_string: str,
-    collection_name: str = "chunks",
+    collection_name: str = "chunks",   # ← we still accept this param for compatibility
     embedding: Embeddings = None,
     k: int = 4,
 ) -> BaseRetriever:
+    """
+    PostgreSQL + pgvector retriever using langchain-postgres (current API)
+    Uses table_name instead of collection_name
+    """
     try:
         from langchain_postgres import PGEngine, PGVectorStore
     except ImportError:
-        raise ImportError("Please install:  pip install langchain-postgres psycopg")
+        raise ImportError(
+            "pip install langchain-postgres --upgrade   # make sure latest version"
+        )
 
     if embedding is None:
-        raise ValueError("Embedding model must be provided")
+        raise ValueError("Embedding model must be provided for PGVector")
 
-    if connection_string is None:
-        raise ValueError("Connection string is None")
-    if not isinstance(connection_string, str):
-        raise TypeError(f"Connection string must be str, got {type(connection_string)}")
-
-    cleaned = connection_string.strip()
+    cleaned = (connection_string or "").strip()
     if not cleaned:
-        raise ValueError("Connection string is empty")
+        raise ValueError("Connection string is empty or None")
 
+    # Create engine
     engine = PGEngine.from_connection_string(url=cleaned)
 
+    # Use table_name (the modern parameter)
+    # collection_name from function arg becomes table_name here
     vector_store = PGVectorStore(
         engine=engine,
-        collection_name=collection_name,
+        table_name=collection_name,      # ← key change: table_name, not collection_name
         embeddings=embedding,
     )
+
+    # Optional: If table doesn't exist yet, initialize it (uncomment if needed on first run)
+    # vector_store.create_vectorstore_table_if_not_exists()
 
     return vector_store.as_retriever(
         search_type="similarity",
         search_kwargs={"k": k},
     )
-
+    
 # ─── MySQL (unchanged) ─────────────────────────────────────────────────────
 def get_mysql_retriever(
     host: str = "localhost",
@@ -97,3 +104,4 @@ def get_mysql_retriever(
 
 # ─── Oracle & MongoDB (unchanged – can keep as is) ─────────────────────────
 # ... (your existing Oracle and MongoDB code here if needed)
+
