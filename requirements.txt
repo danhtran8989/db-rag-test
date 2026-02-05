@@ -1,14 +1,15 @@
 transformers==4.5.0
-langchain 
+transformers==4.45.0
+langchain==0.1.20
+langchain-core==0.1.53
+langchain-huggingface==0.0.3   # last version before big tokenizers jump
+huggingface-hub==0.23.0        # old compatible with tokenizers ~0.19
 langchain-postgres==0.0.1
 # langchain-mongodb==0.5.0     # or even 0.3.0–0.4.0 range
-langchain-core==0.1.53       # explicit pin in the overlapping range
-langchain==0.1.20
-langchain-huggingface 
-huggingface-hub==0.33.1
 # oracledb 
 # pymongo
 gradio
+
 
 
 
