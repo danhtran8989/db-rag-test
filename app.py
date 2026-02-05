@@ -27,7 +27,7 @@ embeddings = HuggingFaceEmbeddings(
 # Qwen3-1.7B as lightweight open-source LLM
 model_id = "Qwen/Qwen3-1.7B"          # or "Qwen/Qwen3-1.7B-Instruct" if you find instruct-tuned variant
 
-tokenizer = AutoTokenizer.from_pretrained(model_id)
+tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=False)
 model = AutoModelForCausalLM.from_pretrained(
     model_id,
     torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
@@ -269,4 +269,5 @@ if __name__ == "__main__":
         server_port=args.port,
         share=args.share,
         # debug=args.debug,   # if you add --debug later
+
     )
