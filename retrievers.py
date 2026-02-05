@@ -4,43 +4,55 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.embeddings import Embeddings
 
 # ─── PostgreSQL (Supabase compatible) ──────────────────────────────────────
+# retrievers.py  (replace only the PostgreSQL function)
+
 def get_postgres_retriever(
     connection_string: str,
-    collection_name: str = "chunks",   # ← we still accept this param for compatibility
+    collection_name: str = "chunks",   # table name – keep param name for compatibility
     embedding: Embeddings = None,
     k: int = 4,
 ) -> BaseRetriever:
     """
-    PostgreSQL + pgvector retriever using langchain-postgres (current API)
-    Uses table_name instead of collection_name
+    PostgreSQL + pgvector using current langchain-postgres API (create_sync + init table)
     """
     try:
         from langchain_postgres import PGEngine, PGVectorStore
     except ImportError:
         raise ImportError(
-            "pip install langchain-postgres --upgrade   # make sure latest version"
+            "Please run: pip install --upgrade langchain-postgres psycopg"
         )
 
     if embedding is None:
-        raise ValueError("Embedding model must be provided for PGVector")
+        raise ValueError("Embedding model required")
 
     cleaned = (connection_string or "").strip()
     if not cleaned:
         raise ValueError("Connection string is empty or None")
 
-    # Create engine
+    # Create engine from connection string
     engine = PGEngine.from_connection_string(url=cleaned)
 
-    # Use table_name (the modern parameter)
-    # collection_name from function arg becomes table_name here
-    vector_store = PGVectorStore(
-        engine=engine,
-        table_name=collection_name,      # ← key change: table_name, not collection_name
-        embeddings=embedding,
-    )
+    # IMPORTANT: Initialize the table if it doesn't exist yet
+    # Dimension = 384 for BAAI/bge-small-en-v1.5
+    # Run this only once (or when changing dim) – comment out after first success
+    try:
+        engine.init_vectorstore_table(
+            table_name=collection_name,
+            vector_size=384,   # ← must match your embeddings dimension!
+            # schema_name="public",  # optional – uncomment if using custom schema
+        )
+    except Exception as init_err:
+        # Ignore if table already exists (common error)
+        if "already exists" not in str(init_err).lower():
+            raise init_err
 
-    # Optional: If table doesn't exist yet, initialize it (uncomment if needed on first run)
-    # vector_store.create_vectorstore_table_if_not_exists()
+    # Create the vector store using create_sync (sync version for simplicity)
+    vector_store = PGVectorStore.create_sync(
+        engine=engine,
+        embedding_service=embedding,   # ← note: embedding_service, not embeddings
+        table_name=collection_name,
+        # schema_name="public",       # optional
+    )
 
     return vector_store.as_retriever(
         search_type="similarity",
@@ -104,4 +116,5 @@ def get_mysql_retriever(
 
 # ─── Oracle & MongoDB (unchanged – can keep as is) ─────────────────────────
 # ... (your existing Oracle and MongoDB code here if needed)
+
 
