@@ -1,4 +1,3 @@
-# app.py
 import gradio as gr
 from typing import List
 from langchain_core.documents import Document
@@ -17,22 +16,25 @@ from retrievers import (
 # ─── Global state ──────────────────────────────────────────────────────────
 current_retriever = None
 
-# Lightweight open-source embedding model (replacement for OpenAI's text-embedding-3-small)
+# Lightweight embedding model
 embeddings = HuggingFaceEmbeddings(
     model_name="BAAI/bge-small-en-v1.5",
     model_kwargs={"device": "cuda" if torch.cuda.is_available() else "cpu"},
     encode_kwargs={"normalize_embeddings": True},
 )
 
-# Qwen3-1.7B as lightweight open-source LLM
-model_id = "Qwen/Qwen3-1.7B"          # or "Qwen/Qwen3-1.7B-Instruct" if you find instruct-tuned variant
+# Qwen3-1.7B – use instruct variant for better chat performance
+# If you prefer base model → keep "Qwen/Qwen3-1.7B"
+model_id = "Qwen/Qwen3-1.7B-Instruct"  # recommended for RAG/chat
 
 tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=False)
+
 model = AutoModelForCausalLM.from_pretrained(
     model_id,
-    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+    torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,  # bfloat16 better on GPU
     device_map="auto",
     low_cpu_mem_usage=True,
+    trust_remote_code=False,  # usually not needed for Qwen3
 )
 
 hf_pipeline = pipeline(
@@ -51,10 +53,19 @@ llm = ChatHuggingFace(
     llm=HuggingFacePipeline(pipeline=hf_pipeline),
 )
 
+# Optional: apply chat template if using instruct model (recommended)
+def format_prompt(messages):
+    # Qwen3 uses a simple chat format; can also use tokenizer.apply_chat_template
+    formatted = ""
+    for msg in messages:
+        role = msg["role"].capitalize()
+        formatted += f"<|{role}|>\n{msg['content']}\n"
+    formatted += "<|Assistant|>\n"
+    return formatted
+
 # ─── RAG logic ─────────────────────────────────────────────────────────────
 def retrieve_and_generate(query: str, history: List):
     global current_retriever
-
     if current_retriever is None:
         return history + [(query, "Please configure database connection first.")], ""
 
@@ -77,6 +88,7 @@ def retrieve_and_generate(query: str, history: List):
     system_prompt = """You are a helpful assistant that answers questions using **only** the provided context.
 If the context does not contain enough information, clearly say so and do not make up facts."""
 
+    # Better prompt structure for instruct models
     user_prompt = f"""Context:
 {context}
 
@@ -87,22 +99,22 @@ Answer:"""
     try:
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_prompt},
+            {"role": "user", "content": user_prompt},
         ]
+
+        # Optional: use tokenizer.apply_chat_template for instruct models
+        # prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
         response = llm.invoke(messages)
         answer = response.content.strip()
-
     except Exception as e:
         answer = f"LLM error: {str(e)}"
 
     return history + [(query, answer)], ""
 
-
 # ─── Database connection setup ─────────────────────────────────────────────
 def connect_to_db(db_type: str, **kwargs):
     global current_retriever
-
     try:
         if db_type == "MySQL":
             current_retriever = get_mysql_retriever(
@@ -112,19 +124,16 @@ def connect_to_db(db_type: str, **kwargs):
                 database=kwargs.get("database", "rag_db"),
                 port=int(kwargs.get("port", 3306)),
             )
-
         elif db_type == "PostgreSQL":
             current_retriever = get_postgres_retriever(
                 connection_string=kwargs.get("connection_string", "")
             )
-
         elif db_type == "Oracle":
             current_retriever = get_oracle_retriever(
                 dsn=kwargs.get("dsn", ""),
                 user=kwargs.get("user", ""),
                 password=kwargs.get("password", ""),
             )
-
         elif db_type == "MongoDB":
             current_retriever = get_mongodb_retriever(
                 uri=kwargs.get("uri", ""),
@@ -132,29 +141,23 @@ def connect_to_db(db_type: str, **kwargs):
                 collection=kwargs.get("collection", "chunks"),
                 index_name=kwargs.get("index_name", "vector_index"),
             )
-
         else:
-            return "Unsupported database type.", None
+            return "Unsupported database type.", "Not connected"
 
-        return f"Connected to {db_type} successfully!", f"Active: {db_type}"
-
+        return f"Connected to {db_type} successfully!", f"**Active:** {db_type}"
     except Exception as e:
         current_retriever = None
-        return f"Connection failed: {str(e)}", "Not connected"
-
+        return f"Connection failed: {str(e)}", "**Status:** Not connected"
 
 # ─── Gradio Interface ──────────────────────────────────────────────────────
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
-
     gr.Markdown("# RAG Chat – Connect to Your Database (Open-source models)")
-
     with gr.Tab("Database Connection"):
         db_type = gr.Dropdown(
             choices=["MySQL", "PostgreSQL", "Oracle", "MongoDB"],
             label="Database Type",
             value="PostgreSQL"
         )
-
         # MySQL fields
         with gr.Group(visible=True) as mysql_group:
             mysql_host = gr.Textbox(label="Host", value="localhost")
@@ -162,7 +165,6 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             mysql_user = gr.Textbox(label="User", value="root")
             mysql_password = gr.Textbox(label="Password", type="password")
             mysql_db = gr.Textbox(label="Database", value="rag_db")
-
         # PostgreSQL
         with gr.Group(visible=False) as pg_group:
             pg_conn_str = gr.Textbox(
@@ -170,13 +172,11 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 placeholder="postgresql+psycopg://user:pass@host:5432/dbname",
                 lines=2
             )
-
         # Oracle
         with gr.Group(visible=False) as oracle_group:
             oracle_dsn = gr.Textbox(label="DSN", placeholder="host:port/service_name")
             oracle_user = gr.Textbox(label="User")
             oracle_password = gr.Textbox(label="Password", type="password")
-
         # MongoDB
         with gr.Group(visible=False) as mongo_group:
             mongo_uri = gr.Textbox(label="Connection URI", placeholder="mongodb+srv://...")
@@ -202,7 +202,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             outputs=[mysql_group, pg_group, oracle_group, mongo_group]
         )
 
-        # Connect button logic
+        # Connect button logic – collect all possible inputs
         connect_inputs = [
             db_type,
             mysql_host, mysql_port, mysql_user, mysql_password, mysql_db,
@@ -210,7 +210,6 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             oracle_dsn, oracle_user, oracle_password,
             mongo_uri, mongo_db, mongo_coll, mongo_index,
         ]
-
         connect_btn.click(
             connect_to_db,
             inputs=connect_inputs,
@@ -238,7 +237,6 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
 if __name__ == "__main__":
     import argparse
-
     parser = argparse.ArgumentParser(
         description="RAG Chat – Connect to Your Database (Open-source models)"
     )
@@ -259,15 +257,9 @@ if __name__ == "__main__":
         default="0.0.0.0",
         help="Host to bind the server to (default: 0.0.0.0)"
     )
-    # You can easily add more flags later, e.g.:
-    # parser.add_argument("--debug", action="store_true", help="Enable debug mode")
-
     args = parser.parse_args()
-
     demo.launch(
         server_name=args.host,
         server_port=args.port,
         share=args.share,
-        # debug=args.debug,   # if you add --debug later
-
     )
