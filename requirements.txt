@@ -1,0 +1,8 @@
+langchain langchain-openai
+langchain-postgres[psycopg]
+langchain-mongodb
+langchain-oracledb
+mysql-connector-python
+oracledb 
+pymongo
+gradio
