@@ -23,7 +23,7 @@ embeddings = HuggingFaceEmbeddings(
     encode_kwargs={"normalize_embeddings": True},
 )
 
-# Model – using a small, good instruct model suitable for RAG
+# Model – small instruct model good for RAG
 model_id = "Qwen/Qwen2.5-1.5B-Instruct"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = AutoModelForCausalLM.from_pretrained(
@@ -90,7 +90,6 @@ Answer:"""
 
     return history + [(query, answer)], ""
 
-
 # ─── Database connection setup ─────────────────────────────────────────────
 def connect_to_db(
     db_type: str,
@@ -111,7 +110,20 @@ def connect_to_db(
     global current_retriever
 
     try:
-        if db_type == "MySQL":
+        if db_type == "PostgreSQL":  # ← Supabase uses this
+            if pg_conn_str is None or not isinstance(pg_conn_str, str) or not pg_conn_str.strip():
+                return (
+                    "Error: Please paste your Supabase connection string.\n"
+                    "Example (transaction pooler):\n"
+                    "postgresql+psycopg://postgres.[project-ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres",
+                    "**Status:** Not connected"
+                )
+            current_retriever = get_postgres_retriever(
+                connection_string=pg_conn_str.strip(),
+                embedding=embeddings,
+            )
+
+        elif db_type == "MySQL":
             current_retriever = get_mysql_retriever(
                 host=mysql_host,
                 port=int(mysql_port),
@@ -121,20 +133,7 @@ def connect_to_db(
                 embedding=embeddings,
             )
 
-        elif db_type == "PostgreSQL":
-            if pg_conn_str is None or not isinstance(pg_conn_str, str) or not pg_conn_str.strip():
-                return (
-                    "Error: Please enter a valid PostgreSQL connection string.",
-                    "**Status:** Not connected"
-                )
-            current_retriever = get_postgres_retriever(
-                connection_string=pg_conn_str.strip(),
-                embedding=embeddings,
-            )
-
         elif db_type == "Oracle":
-            if not oracle_dsn.strip() or not oracle_user.strip():
-                return "Error: Oracle DSN and user are required.", "**Status:** Not connected"
             current_retriever = get_oracle_retriever(
                 dsn=oracle_dsn.strip(),
                 user=oracle_user.strip(),
@@ -143,8 +142,6 @@ def connect_to_db(
             )
 
         elif db_type == "MongoDB":
-            if not mongo_uri.strip():
-                return "Error: MongoDB URI is required.", "**Status:** Not connected"
             current_retriever = get_mongodb_retriever(
                 uri=mongo_uri.strip(),
                 db_name=mongo_db_name.strip() or "rag",
@@ -156,36 +153,42 @@ def connect_to_db(
         else:
             return "Unsupported database type.", "**Status:** Not connected"
 
-        return f"Connected to {db_type} successfully!", f"**Active:** {db_type}"
+        return f"Connected to {db_type} (Supabase/PostgreSQL) successfully!", f"**Active:** {db_type}"
 
     except Exception as e:
         current_retriever = None
-        return f"Connection failed: {str(e)}", "**Status:** Not connected"
+        err_msg = str(e)
+        if "password" in err_msg.lower() or "authentication" in err_msg.lower():
+            return f"Connection failed: Wrong password or user format. Check Supabase dashboard.", "**Status:** Not connected"
+        if "pooler" in err_msg.lower() or "tenant" in err_msg.lower():
+            return f"Connection failed: Likely wrong pooler URL or port. Use port 6543 for transaction pooler.", "**Status:** Not connected"
+        return f"Connection failed: {err_msg}", "**Status:** Not connected"
 
 
 # ─── Gradio Interface ──────────────────────────────────────────────────────
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# RAG Chat – Connect to Your Database (Open-source models)")
+    gr.Markdown("# RAG Chat – Connect to Database (Supabase supported)")
 
     with gr.Tab("Database Connection"):
         db_type = gr.Dropdown(
-            choices=["MySQL", "PostgreSQL", "Oracle", "MongoDB"],
+            choices=["PostgreSQL", "MySQL", "Oracle", "MongoDB"],
             label="Database Type",
-            value="PostgreSQL"
+            value="PostgreSQL"  # default to Supabase/PostgreSQL
         )
 
-        with gr.Group(visible=True) as mysql_group:
+        with gr.Group(visible=False) as mysql_group:
             mysql_host = gr.Textbox(label="Host", value="localhost")
             mysql_port = gr.Number(label="Port", value=3306, precision=0)
             mysql_user = gr.Textbox(label="User", value="root")
             mysql_password = gr.Textbox(label="Password", type="password")
             mysql_db = gr.Textbox(label="Database", value="rag_db")
 
-        with gr.Group(visible=False) as pg_group:
+        with gr.Group(visible=True) as pg_group:
             pg_conn_str = gr.Textbox(
-                label="Connection String",
-                placeholder="postgresql+psycopg://user:password@localhost:5432/rag_db",
-                lines=2
+                label="Supabase / PostgreSQL Connection String",
+                placeholder="postgresql+psycopg://postgres.[project-ref]:[your-password]@aws-0-[region].pooler.supabase.com:6543/postgres",
+                lines=3,
+                info="Use Transaction pooler (port 6543) from Supabase → Settings → Database → Connect"
             )
 
         with gr.Group(visible=False) as oracle_group:
@@ -204,7 +207,6 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
         connect_btn = gr.Button("Connect")
 
-        # ─── Visibility logic ───────────────────────────────────────
         def update_visibility(db):
             return (
                 gr.update(visible=db == "MySQL"),
@@ -219,7 +221,6 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             outputs=[mysql_group, pg_group, oracle_group, mongo_group]
         )
 
-        # Connect button – inputs order MUST match function parameters
         connect_btn.click(
             fn=connect_to_db,
             inputs=[
@@ -254,7 +255,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="RAG Chat – Database Vector Search")
+    parser = argparse.ArgumentParser(description="RAG Chat – Supabase / PostgreSQL Vector Search")
     parser.add_argument("--share", action="store_true", help="Create public Gradio link")
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--host", type=str, default="0.0.0.0")
