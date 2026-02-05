@@ -16,15 +16,15 @@ from retrievers import (
 # ─── Global state ──────────────────────────────────────────────────────────
 current_retriever = None
 
-# Lightweight embedding model
+# Lightweight embedding model (384 dim)
 embeddings = HuggingFaceEmbeddings(
     model_name="BAAI/bge-small-en-v1.5",
     model_kwargs={"device": "cuda" if torch.cuda.is_available() else "cpu"},
     encode_kwargs={"normalize_embeddings": True},
 )
 
-# Qwen3-1.7B – instruct variant recommended for chat/RAG
-model_id = "Qwen/Qwen2.5-1.5B-Instruct"  # ← changed to more recent & better performing small model
+# Model – using a small, good instruct model suitable for RAG
+model_id = "Qwen/Qwen2.5-1.5B-Instruct"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = AutoModelForCausalLM.from_pretrained(
     model_id,
@@ -122,25 +122,34 @@ def connect_to_db(
             )
 
         elif db_type == "PostgreSQL":
+            if pg_conn_str is None or not isinstance(pg_conn_str, str) or not pg_conn_str.strip():
+                return (
+                    "Error: Please enter a valid PostgreSQL connection string.",
+                    "**Status:** Not connected"
+                )
             current_retriever = get_postgres_retriever(
-                connection_string=pg_conn_str,
+                connection_string=pg_conn_str.strip(),
                 embedding=embeddings,
             )
 
         elif db_type == "Oracle":
+            if not oracle_dsn.strip() or not oracle_user.strip():
+                return "Error: Oracle DSN and user are required.", "**Status:** Not connected"
             current_retriever = get_oracle_retriever(
-                dsn=oracle_dsn,
-                user=oracle_user,
+                dsn=oracle_dsn.strip(),
+                user=oracle_user.strip(),
                 password=oracle_password,
                 embedding=embeddings,
             )
 
         elif db_type == "MongoDB":
+            if not mongo_uri.strip():
+                return "Error: MongoDB URI is required.", "**Status:** Not connected"
             current_retriever = get_mongodb_retriever(
-                uri=mongo_uri,
-                db_name=mongo_db_name,
-                collection=mongo_collection,
-                index_name=mongo_index_name,
+                uri=mongo_uri.strip(),
+                db_name=mongo_db_name.strip() or "rag",
+                collection=mongo_collection.strip() or "chunks",
+                index_name=mongo_index_name.strip() or "vector_index",
                 embedding=embeddings,
             )
 
@@ -175,7 +184,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         with gr.Group(visible=False) as pg_group:
             pg_conn_str = gr.Textbox(
                 label="Connection String",
-                placeholder="postgresql+psycopg://user:pass@host:5432/dbname?sslmode=disable",
+                placeholder="postgresql+psycopg://user:password@localhost:5432/rag_db",
                 lines=2
             )
 
@@ -195,7 +204,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
         connect_btn = gr.Button("Connect")
 
-        # Visibility switching
+        # ─── Visibility logic ───────────────────────────────────────
         def update_visibility(db):
             return (
                 gr.update(visible=db == "MySQL"),
@@ -210,7 +219,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             outputs=[mysql_group, pg_group, oracle_group, mongo_group]
         )
 
-        # Connect button – now matches function signature
+        # Connect button – inputs order MUST match function parameters
         connect_btn.click(
             fn=connect_to_db,
             inputs=[
