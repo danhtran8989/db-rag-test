@@ -1,16 +1,15 @@
 transformers==4.5.0
 langchain 
-# langchain-openai
-# langchain-postgres[psycopg]
-langchain-postgres
-langchain-mongodb
-langchain-oracledb
-mysql-connector-python
+langchain-postgres==0.0.1
+# langchain-mongodb==0.5.0     # or even 0.3.0–0.4.0 range
+langchain-core==0.1.53       # explicit pin in the overlapping range
+langchain==0.1.20
 langchain-huggingface 
 huggingface-hub==0.33.1
 # oracledb 
 # pymongo
 gradio
+
 
 
 
