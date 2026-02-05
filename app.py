@@ -23,18 +23,14 @@ embeddings = HuggingFaceEmbeddings(
     encode_kwargs={"normalize_embeddings": True},
 )
 
-# Qwen3-1.7B – use instruct variant for better chat performance
-# If you prefer base model → keep "Qwen/Qwen3-1.7B"
-model_id = "Qwen/Qwen3-1.7B"  # recommended for RAG/chat
-
-tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=False)
-
+# Qwen3-1.7B – instruct variant recommended for chat/RAG
+model_id = "Qwen/Qwen2.5-1.5B-Instruct"  # ← changed to more recent & better performing small model
+tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = AutoModelForCausalLM.from_pretrained(
     model_id,
-    torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,  # bfloat16 better on GPU
+    torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
     device_map="auto",
     low_cpu_mem_usage=True,
-    trust_remote_code=False,  # usually not needed for Qwen3
 )
 
 hf_pipeline = pipeline(
@@ -42,26 +38,13 @@ hf_pipeline = pipeline(
     model=model,
     tokenizer=tokenizer,
     max_new_tokens=512,
-    temperature=0.2,
-    top_p=0.9,
+    temperature=0.25,
+    top_p=0.92,
     repetition_penalty=1.05,
     do_sample=True,
-    device_map="auto",
 )
 
-llm = ChatHuggingFace(
-    llm=HuggingFacePipeline(pipeline=hf_pipeline),
-)
-
-# Optional: apply chat template if using instruct model (recommended)
-def format_prompt(messages):
-    # Qwen3 uses a simple chat format; can also use tokenizer.apply_chat_template
-    formatted = ""
-    for msg in messages:
-        role = msg["role"].capitalize()
-        formatted += f"<|{role}|>\n{msg['content']}\n"
-    formatted += "<|Assistant|>\n"
-    return formatted
+llm = ChatHuggingFace(llm=HuggingFacePipeline(pipeline=hf_pipeline))
 
 # ─── RAG logic ─────────────────────────────────────────────────────────────
 def retrieve_and_generate(query: str, history: List):
@@ -88,7 +71,6 @@ def retrieve_and_generate(query: str, history: List):
     system_prompt = """You are a helpful assistant that answers questions using **only** the provided context.
 If the context does not contain enough information, clearly say so and do not make up facts."""
 
-    # Better prompt structure for instruct models
     user_prompt = f"""Context:
 {context}
 
@@ -101,10 +83,6 @@ Answer:"""
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-
-        # Optional: use tokenizer.apply_chat_template for instruct models
-        # prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-
         response = llm.invoke(messages)
         answer = response.content.strip()
     except Exception as e:
@@ -112,82 +90,112 @@ Answer:"""
 
     return history + [(query, answer)], ""
 
+
 # ─── Database connection setup ─────────────────────────────────────────────
-def connect_to_db(db_type: str, **kwargs):
+def connect_to_db(
+    db_type: str,
+    mysql_host: str,
+    mysql_port: float,
+    mysql_user: str,
+    mysql_password: str,
+    mysql_db: str,
+    pg_conn_str: str,
+    oracle_dsn: str,
+    oracle_user: str,
+    oracle_password: str,
+    mongo_uri: str,
+    mongo_db_name: str,
+    mongo_collection: str,
+    mongo_index_name: str,
+) -> tuple[str, str]:
     global current_retriever
+
     try:
         if db_type == "MySQL":
             current_retriever = get_mysql_retriever(
-                host=kwargs.get("host", "localhost"),
-                user=kwargs.get("user", "root"),
-                password=kwargs.get("password", ""),
-                database=kwargs.get("database", "rag_db"),
-                port=int(kwargs.get("port", 3306)),
+                host=mysql_host,
+                port=int(mysql_port),
+                user=mysql_user,
+                password=mysql_password,
+                database=mysql_db,
+                embedding=embeddings,
             )
+
         elif db_type == "PostgreSQL":
             current_retriever = get_postgres_retriever(
-                connection_string=kwargs.get("connection_string", "")
+                connection_string=pg_conn_str,
+                embedding=embeddings,
             )
+
         elif db_type == "Oracle":
             current_retriever = get_oracle_retriever(
-                dsn=kwargs.get("dsn", ""),
-                user=kwargs.get("user", ""),
-                password=kwargs.get("password", ""),
+                dsn=oracle_dsn,
+                user=oracle_user,
+                password=oracle_password,
+                embedding=embeddings,
             )
+
         elif db_type == "MongoDB":
             current_retriever = get_mongodb_retriever(
-                uri=kwargs.get("uri", ""),
-                db_name=kwargs.get("db_name", "rag"),
-                collection=kwargs.get("collection", "chunks"),
-                index_name=kwargs.get("index_name", "vector_index"),
+                uri=mongo_uri,
+                db_name=mongo_db_name,
+                collection=mongo_collection,
+                index_name=mongo_index_name,
+                embedding=embeddings,
             )
+
         else:
-            return "Unsupported database type.", "Not connected"
+            return "Unsupported database type.", "**Status:** Not connected"
 
         return f"Connected to {db_type} successfully!", f"**Active:** {db_type}"
+
     except Exception as e:
         current_retriever = None
         return f"Connection failed: {str(e)}", "**Status:** Not connected"
 
+
 # ─── Gradio Interface ──────────────────────────────────────────────────────
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
     gr.Markdown("# RAG Chat – Connect to Your Database (Open-source models)")
+
     with gr.Tab("Database Connection"):
         db_type = gr.Dropdown(
             choices=["MySQL", "PostgreSQL", "Oracle", "MongoDB"],
             label="Database Type",
             value="PostgreSQL"
         )
-        # MySQL fields
+
         with gr.Group(visible=True) as mysql_group:
             mysql_host = gr.Textbox(label="Host", value="localhost")
             mysql_port = gr.Number(label="Port", value=3306, precision=0)
             mysql_user = gr.Textbox(label="User", value="root")
             mysql_password = gr.Textbox(label="Password", type="password")
             mysql_db = gr.Textbox(label="Database", value="rag_db")
-        # PostgreSQL
+
         with gr.Group(visible=False) as pg_group:
             pg_conn_str = gr.Textbox(
                 label="Connection String",
-                placeholder="postgresql+psycopg://user:pass@host:5432/dbname",
+                placeholder="postgresql+psycopg://user:pass@host:5432/dbname?sslmode=disable",
                 lines=2
             )
-        # Oracle
+
         with gr.Group(visible=False) as oracle_group:
-            oracle_dsn = gr.Textbox(label="DSN", placeholder="host:port/service_name")
+            oracle_dsn = gr.Textbox(label="DSN", placeholder="localhost:1521/orclpdb1")
             oracle_user = gr.Textbox(label="User")
             oracle_password = gr.Textbox(label="Password", type="password")
-        # MongoDB
+
         with gr.Group(visible=False) as mongo_group:
-            mongo_uri = gr.Textbox(label="Connection URI", placeholder="mongodb+srv://...")
-            mongo_db = gr.Textbox(label="Database Name", value="rag")
-            mongo_coll = gr.Textbox(label="Collection Name", value="chunks")
-            mongo_index = gr.Textbox(label="Vector Index Name", value="vector_index")
+            mongo_uri = gr.Textbox(label="Connection URI", placeholder="mongodb://localhost:27017")
+            mongo_db_name = gr.Textbox(label="Database Name", value="rag")
+            mongo_collection = gr.Textbox(label="Collection Name", value="chunks")
+            mongo_index_name = gr.Textbox(label="Vector Index Name", value="vector_index")
 
         status = gr.Markdown("**Status:** Not connected")
+        result_box = gr.Textbox(label="Connection Result", interactive=False)
+
         connect_btn = gr.Button("Connect")
 
-        # Show/hide correct fields
+        # Visibility switching
         def update_visibility(db):
             return (
                 gr.update(visible=db == "MySQL"),
@@ -202,18 +210,17 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             outputs=[mysql_group, pg_group, oracle_group, mongo_group]
         )
 
-        # Connect button logic – collect all possible inputs
-        connect_inputs = [
-            db_type,
-            mysql_host, mysql_port, mysql_user, mysql_password, mysql_db,
-            pg_conn_str,
-            oracle_dsn, oracle_user, oracle_password,
-            mongo_uri, mongo_db, mongo_coll, mongo_index,
-        ]
+        # Connect button – now matches function signature
         connect_btn.click(
-            connect_to_db,
-            inputs=connect_inputs,
-            outputs=[gr.Textbox(label="Connection Result"), status]
+            fn=connect_to_db,
+            inputs=[
+                db_type,
+                mysql_host, mysql_port, mysql_user, mysql_password, mysql_db,
+                pg_conn_str,
+                oracle_dsn, oracle_user, oracle_password,
+                mongo_uri, mongo_db_name, mongo_collection, mongo_index_name,
+            ],
+            outputs=[result_box, status]
         )
 
     with gr.Tab("Chat"):
@@ -235,32 +242,17 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         )
         clear.click(lambda: None, None, chatbot)
 
+
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(
-        description="RAG Chat – Connect to Your Database (Open-source models)"
-    )
-    parser.add_argument(
-        "--share",
-        action="store_true",
-        help="Create a publicly shareable Gradio link (temporary public URL)"
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=7860,
-        help="Port to run the Gradio server on (default: 7860)"
-    )
-    parser.add_argument(
-        "--host",
-        type=str,
-        default="0.0.0.0",
-        help="Host to bind the server to (default: 0.0.0.0)"
-    )
+    parser = argparse.ArgumentParser(description="RAG Chat – Database Vector Search")
+    parser.add_argument("--share", action="store_true", help="Create public Gradio link")
+    parser.add_argument("--port", type=int, default=7860)
+    parser.add_argument("--host", type=str, default="0.0.0.0")
     args = parser.parse_args()
+
     demo.launch(
         server_name=args.host,
         server_port=args.port,
         share=args.share,
     )
-
