@@ -2,12 +2,13 @@ transformers==4.45.0
 langchain==0.1.20
 langchain-core==0.1.53
 langchain-huggingface==0.0.3   # last version before big tokenizers jump
-huggingface-hub==0.23.0        # old compatible with tokenizers ~0.19
+huggingface-hub>=0.23.2,<0.24.0   # narrow range if needed       # old compatible with tokenizers ~0.19
 langchain-postgres==0.0.1
 # langchain-mongodb==0.5.0     # or even 0.3.0–0.4.0 range
 # oracledb 
 # pymongo
 gradio
+
 
 
 
