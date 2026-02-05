@@ -7,10 +7,10 @@ import torch
 
 # ─── Import retriever factories ────────────────────────────────────────────
 from retrievers import (
-    get_mysql_retriever,
+    # get_mysql_retriever,
     get_postgres_retriever,
-    get_oracle_retriever,
-    get_mongodb_retriever,
+    # get_oracle_retriever,
+    # get_mongodb_retriever,
 )
 
 # ─── Global state ──────────────────────────────────────────────────────────
@@ -123,32 +123,32 @@ def connect_to_db(
                 embedding=embeddings,
             )
 
-        elif db_type == "MySQL":
-            current_retriever = get_mysql_retriever(
-                host=mysql_host,
-                port=int(mysql_port),
-                user=mysql_user,
-                password=mysql_password,
-                database=mysql_db,
-                embedding=embeddings,
-            )
+        # elif db_type == "MySQL":
+        #     current_retriever = get_mysql_retriever(
+        #         host=mysql_host,
+        #         port=int(mysql_port),
+        #         user=mysql_user,
+        #         password=mysql_password,
+        #         database=mysql_db,
+        #         embedding=embeddings,
+        #     )
 
-        elif db_type == "Oracle":
-            current_retriever = get_oracle_retriever(
-                dsn=oracle_dsn.strip(),
-                user=oracle_user.strip(),
-                password=oracle_password,
-                embedding=embeddings,
-            )
+        # elif db_type == "Oracle":
+        #     current_retriever = get_oracle_retriever(
+        #         dsn=oracle_dsn.strip(),
+        #         user=oracle_user.strip(),
+        #         password=oracle_password,
+        #         embedding=embeddings,
+        #     )
 
-        elif db_type == "MongoDB":
-            current_retriever = get_mongodb_retriever(
-                uri=mongo_uri.strip(),
-                db_name=mongo_db_name.strip() or "rag",
-                collection=mongo_collection.strip() or "chunks",
-                index_name=mongo_index_name.strip() or "vector_index",
-                embedding=embeddings,
-            )
+        # elif db_type == "MongoDB":
+        #     current_retriever = get_mongodb_retriever(
+        #         uri=mongo_uri.strip(),
+        #         db_name=mongo_db_name.strip() or "rag",
+        #         collection=mongo_collection.strip() or "chunks",
+        #         index_name=mongo_index_name.strip() or "vector_index",
+        #         embedding=embeddings,
+        #     )
 
         else:
             return "Unsupported database type.", "**Status:** Not connected"
@@ -266,3 +266,4 @@ if __name__ == "__main__":
         server_port=args.port,
         share=args.share,
     )
+
