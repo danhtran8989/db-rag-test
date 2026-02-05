@@ -25,7 +25,7 @@ embeddings = HuggingFaceEmbeddings(
 
 # Qwen3-1.7B – use instruct variant for better chat performance
 # If you prefer base model → keep "Qwen/Qwen3-1.7B"
-model_id = "Qwen/Qwen3-1.7B-Instruct"  # recommended for RAG/chat
+model_id = "Qwen/Qwen3-1.7B"  # recommended for RAG/chat
 
 tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=False)
 
@@ -263,3 +263,4 @@ if __name__ == "__main__":
         server_port=args.port,
         share=args.share,
     )
+
