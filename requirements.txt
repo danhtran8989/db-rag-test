@@ -1,4 +1,4 @@
-transformers==5.0.0
+transformers==4.56.0
 langchain 
 langchain-openai
 langchain-postgres[psycopg]
@@ -10,6 +10,7 @@ huggingface-hub==0.27.1
 oracledb 
 pymongo
 gradio
+
 
 
 
