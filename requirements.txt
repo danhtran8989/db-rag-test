@@ -1,4 +1,5 @@
-langchain langchain-openai
+langchain 
+langchain-openai
 langchain-postgres[psycopg]
 langchain-mongodb
 langchain-oracledb
