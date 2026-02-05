@@ -1,33 +1,51 @@
+# retrievers.py
 from typing import List, Optional
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.embeddings import Embeddings
 
-# ─── PostgreSQL (pgvector) ─────────────────────────────────────────────────
+# ─── PostgreSQL (pgvector) – FIXED version ─────────────────────────────────
 def get_postgres_retriever(
     connection_string: str,
-    collection_name: str = "chunks",
+    collection_name: str = "chunks",  # this is the table name
     embedding: Embeddings = None,
     k: int = 4,
 ) -> BaseRetriever:
+    """
+    PostgreSQL + pgvector retriever using langchain-postgres (2025+ pattern)
+    """
     try:
-        from langchain_postgres import PGVector
+        from langchain_postgres import PGEngine, PGVectorStore
     except ImportError:
-        raise ImportError("pip install langchain-postgres")
+        raise ImportError(
+            "Please install langchain-postgres: pip install langchain-postgres"
+        )
 
     if embedding is None:
-        raise ValueError("Embedding model required for PGVector")
+        raise ValueError("Embedding model must be provided for PGVector")
 
-    vector_store = PGVector(
-        connection=connection_string,
+    if not connection_string.strip():
+        raise ValueError("Connection string cannot be empty")
+
+    # Create the engine from the connection string
+    engine = PGEngine.from_connection_string(url=connection_string)
+
+    # Create the vector store
+    vector_store = PGVectorStore(
+        engine=engine,
         collection_name=collection_name,
         embeddings=embedding,
     )
 
-    return vector_store.as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": k}
+    # Optional: If the table doesn't exist yet, you can initialize it (uncomment if needed)
+    # vector_store.create_vectorstore_table_if_not_exists()   # or similar method if available
+
+    retriever = vector_store.as_retriever(
+        search_type="similarity",  # or "similarity_score_threshold" if you add threshold
+        search_kwargs={"k": k},
     )
+
+    return retriever
 
 
 # ─── MySQL (custom retriever – MySQL 8.4+ vector support) ──────────────────
@@ -142,3 +160,4 @@ def get_mongodb_retriever(
     )
 
     return vector_store.as_retriever(search_kwargs={"k": k})
+
